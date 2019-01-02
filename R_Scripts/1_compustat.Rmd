@@ -22,12 +22,13 @@ library(dplyr)
 
 # interface to WRDS database has previously been established 
 # connect to WRDS databse 
+# WRDS ACCOUNT & SUBSCRIPTION REQUIRED 
 ```{r}
 wrds <- dbConnect(Postgres(), 
                   host='wrds-pgdata.wharton.upenn.edu',
                   port=9737,
-                  user='sabkatst',
-                  password='S!!140140s',
+                  user='username',
+                  password='password',
                   sslmode='require',
                   dbname='wrds')
 
