@@ -1,0 +1,136 @@
+---
+title: "Final sample"
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(tidyverse)
+library(tictoc)
+library(zoo)
+```
+
+
+```{r}
+options("scipen" = 10)
+load(file = "../R_data/sample.Rda")
+```
+
+
+# unique industries represented in the sample
+```{r}
+n_distinct(substr(sample$sic1, start=1, stop=2))
+```
+
+
+# join diversity results
+```{r}
+load(file = "../R_data/result_matrix.Rda")
+sample_final <- sample %>% left_join(result_matrix) %>% dplyr::select(-starts_with("sic"), sic1)
+
+# check 
+anti_join(sample, result_matrix, by = c("fyear", "cvc_fund")) %>% filter(fyear == 2014)
+```
+
+
+# join geo diversity results
+```{r}
+load(file = "../R_data/geo_diversity.Rda")
+sample_final <- sample_final %>% full_join(geo_diversity)
+
+# tidy (because geo diversity=NA when portfolio size=0, in that case logically geo diversity should also be 0)
+sample_final$geo_diversity <- ifelse(is.na(sample_final$geo_diversity), 0, sample_final$geo_diversity)
+```
+
+
+# join cvc experience
+```{r}
+load(file = "../R_data/cvc_experience.Rda")
+sample_final <- sample_final %>% full_join(cvc_experience)
+#tidy
+sample_final$cvc_experience <- ifelse(is.na(sample_final$cvc_experience), 0, sample_final$cvc_experience)
+
+# manipulate experience=0 because of log --> work around: replace 0 by 2nd min value of distribution
+sample_final$cvc_experience <- ifelse(sample_final$cvc_experience == 0, min(sample_final$cvc_experience[sample_final$cvc_experience != min(sample_final$cvc_experience)]), sample_final$cvc_experience)
+
+# mutate log
+sample_final <- sample_final %>% mutate(cvc_experience_ln = log(cvc_experience))
+```
+
+
+# join acquisitions & joint ventures
+```{r}
+load(file = "../R_data/acquisitions.Rda")
+load(file = "../R_data/jointventures.Rda")
+sample_final <- sample_final %>% full_join(acquisitions) %>% full_join(jointventures)
+
+# tidy
+sample_final$acquisitions <- ifelse(is.na(sample_final$acquisitions), 0, sample_final$acquisitions)
+sample_final$jointventures <- ifelse(is.na(sample_final$jointventures), 0, sample_final$jointventures)
+```
+
+
+# compute missing & lag variables
+```{r}
+sample_final <- sample_final %>% arrange(fyear, .by_group=T) %>% 
+                                        mutate(sales_ln = log(sales),
+                                        current_ratio = current_assets/current_liabilies,
+                                        age = fyear - first_year,
+                                        
+                                        #time lag -1
+                                        diversity_L1 = lag(diversity, n = 1, default = NA),
+                                        diversity_ln_L1 = lag(diversity_ln, n = 1, default = NA),
+                                        diversity_ln_sqrt_L1 = lag(diversity_ln_sqrt, n = 1, default = NA),
+                                        
+                                        absorptive_capacity_L1 = lag(absorptive_capacity, n = 1, default = NA),
+                                        geo_diversity_L1 = lag(geo_diversity, n = 1, default = NA),
+
+                                        sales_L1 = lag(sales, n = 1, default = NA),
+                                        sales_ln_L1 = lag(sales_ln, n = 1, default = NA),
+                                        current_ratio_L1 = lag(current_ratio, n = 1, default = NA),
+                                        age_L1 = lag(age, n = 1, default = NA),
+                                        acquisitions_L1 = lag(acquisitions, n = 1, default = NA),
+                                        jointventures_L1 = lag(jointventures, n = 1, default = NA),
+                                        portfolio_size_L1 = lag(portfolio_size, n = 1, default = NA),
+                                        cvc_experience_L1 = lag(cvc_experience, n = 1, default = NA),
+                                        cvc_experience_ln_L1 = lag(cvc_experience_ln, n = 1, default = NA)) 
+```
+
+
+
+# tidy & create subsamples & write STATA output
+```{r}
+sample_final$sic1 <- as.numeric(sample_final$sic1)
+
+library(foreign)
+
+sample_stata <- sample_final %>% dplyr::select(fyear, parent_company, patent_count, diversity_L1, diversity_ln_L1, diversity_ln_sqrt_L1, absorptive_capacity_L1, geo_diversity_L1, sales_L1, sales_ln_L1, current_ratio_L1, age_L1, acquisitions_L1, jointventures_L1, portfolio_size_L1, cvc_experience_L1, cvc_experience_ln_L1, sic1, country)
+
+save(sample_stata, file = "../R_data/sample_stata.Rda")
+write.dta(sample_stata, file = "../Data_tables/STATA/sample_stata.dta")
+
+
+hightech <- c(283, 357, 361, 365, 366, 367, 372, 376, 381, 382, 384, 737, 873)
+subsample_hightech <- sample_stata %>% filter(sic1 %in% hightech)
+write.dta(subsample_hightech, file = "../Data_tables/STATA/subsample_hightech.dta")
+
+
+subsample_US <- sample_stata %>% filter(country == "USA")
+write.dta(subsample_US, file = "../Data_tables/STATA/subsample_US.dta")
+
+
+subsample_uncensored <- sample_stata %>% filter(portfolio_size_L1 > 0)
+write.dta(subsample_uncensored, file = "../Data_tables/STATA/subsample_uncensored.dta")
+```
+
+
+

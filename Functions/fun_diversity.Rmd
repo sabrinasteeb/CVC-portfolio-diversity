@@ -1,0 +1,84 @@
+---
+title: "R Notebook"
+editor_options: 
+  chunk_output_type: console
+---
+
+############# FUNCTIONS ##################
+
+# Calculate Distance between two SIC Vectors
+# Input:    two vectors
+# Output:   single number -> Distance
+
+```{r}
+load("../R_data/fun_distance.Rda")
+```
+
+
+```{r}
+fun_diversity <- function(input_matrix) {
+  
+  # Debugging
+  input_matrix <- temp_matrix
+  
+  
+  
+  number_firms <- nrow(input_matrix)
+  distance_matrix <- matrix(nrow = number_firms, ncol = number_firms)
+  colnames(distance_matrix) <- row.names(input_matrix)
+  row.names(distance_matrix) <- row.names(input_matrix)
+  
+  for (i in seq_len(number_firms)) {
+    for (j in i:number_firms) {
+      distance_matrix[i,j] <- fun_distance(input_matrix[i,],input_matrix[j,])
+      distance_matrix[j,i] <- distance_matrix[i,j]
+    }
+    distance_matrix[i,i] <- 0
+  }
+  
+  # To avoid error if matrix is empty just return 0 and skip the rest
+  if (nrow(distance_matrix) == 0) {
+    portfoilio_diversity <- 0
+    return(portfoilio_diversity)
+  }
+  
+  e <- eigen(distance_matrix, symmetric = TRUE)
+
+  # largest eigenvalue
+  eigenvalue_lambda <- max(e$values)
+  
+  # corresponding eigenvector
+  eigenvector_U <- e$vectors[,1]
+  
+  N <- length(eigenvector_U)
+  fraq <- 1/N
+  
+  temp_vec <- c()
+  
+  for (j in seq_len(N)) {
+    temp_vec[j] <- distance_matrix[1,j] * 
+      eigenvalue_lambda * eigenvector_U[j]
+  }
+  
+  arg_1 <- sum(temp_vec)
+  
+  portfoilio_diversity <- abs(fraq * arg_1)
+  
+  return(portfoilio_diversity)
+}
+```
+
+```{r}
+Investor <- c(431,1,1)
+firma_a <- c(3,436,6)
+firma_b <- c(4,5,4)
+firma_c <- c(435,5,5)
+
+```
+
+
+
+```{r}
+save(fun_diversity,file = "../R_data/fun_diversity.Rda")
+```
+

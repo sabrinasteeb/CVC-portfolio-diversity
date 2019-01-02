@@ -1,0 +1,101 @@
+---
+title: "Acquisitions & Joint Ventures"
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+library(lubridate)
+library(readxl)
+library(tidyverse)
+library(dplyr)
+```
+
+
+# import deals data
+```{r}
+ma_jv_raw <- read_excel("../Data_tables/MA&JV.xlsx") 
+ma_jv <- ma_jv_raw
+```
+
+
+# transform & tidy
+```{r}
+ma_jv$completed_date <- if_else(is.na(ma_jv$completed_date) == T, ma_jv$assumed_completion_date, ma_jv$completed_date)
+
+ma_jv <- ma_jv %>% mutate(fyear = year(completed_date)) %>% select(-"Deal Number", -completed_date, -assumed_completion_date, -"Acquiror name")
+head(ma_jv)
+```
+
+
+
+# CREATE PORTFOLIOS
+
+# determine to which portfolio years M&A und Joint Venture activities belong
+# assumption: each target can be considered an external source of knowledge for 4y on average
+```{r}
+ma_jv$portfolio_year <- NA
+ma_jv <- ma_jv %>% select(fyear, portfolio_year, everything())
+
+
+deals_number <- dim(ma_jv)[1]
+ma_jv_copy <- ma_jv
+ma_jv <- ma_jv_copy[1,]
+ma_jv[] <-  ma_jv[FALSE, ]
+
+tracker <- 1
+
+# run through each deal
+for (i in 1:deals_number) {
+  
+  ma_jv_temp <- ma_jv_copy[i, ]
+  ma_jv_temp$portfolio_year <- ma_jv_temp$fyear
+  ma_jv[dim(ma_jv)[1]+1,] <- ma_jv_temp
+  
+  ma_jv_temp$portfolio_year <- ma_jv_temp$fyear+1
+  ma_jv[dim(ma_jv)[1]+1,] <- ma_jv_temp
+  
+  ma_jv_temp$portfolio_year <- ma_jv_temp$fyear+2
+  ma_jv[dim(ma_jv)[1]+1,] <- ma_jv_temp
+  
+  ma_jv_temp$portfolio_year <- ma_jv_temp$fyear+3
+  ma_jv[dim(ma_jv)[1]+1,] <- ma_jv_temp
+}
+
+head(ma_jv)
+
+
+# tidy
+ma_jv <- ma_jv %>% filter(!is.na(parent_company) & portfolio_year >= 2010 & portfolio_year <= 2015) %>% mutate(duration = portfolio_year - fyear) 
+```
+
+
+# mutate weightning variable
+# assumption: straight-line depreciation because of declining influence as knowledge source / influence in 1st year=100%, in 5th year=0%
+```{r}
+ma_jv$weight <- NA
+ma_jv$weight <- ifelse(ma_jv$duration==0, 1, ifelse(ma_jv$duration==1, 0.75, ifelse(ma_jv$duration==2, 0.5, ifelse(ma_jv$duration==3, 0.25, NA))))
+```
+
+
+# compute depreciated acquisitions count per investor / per year
+```{r}
+ma <- ma_jv %>% filter(str_detect(deal_type, "Acquisition")) %>% group_by_at(vars("portfolio_year", "parent_company")) 
+
+acquisitions <- ma %>% select(portfolio_year, parent_company, weight) %>% summarize(acquisitions = sum(weight)) %>% rename(fyear=portfolio_year)
+save(acquisitions, file = "../R_data/acquisitions.Rda")
+```
+
+
+# compute depreciated joint ventures count per investor / per year
+```{r}
+jv <- ma_jv %>% filter(str_detect(deal_type, "Joint")) %>% group_by_at(vars("portfolio_year", "parent_company")) 
+
+jointventures <- jv %>% select(portfolio_year, parent_company, weight) %>%  summarize(jointventures = sum(weight)) %>% rename(fyear=portfolio_year)
+save(jointventures, file = "../R_data/jointventures.Rda")
+```
+

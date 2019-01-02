@@ -1,0 +1,177 @@
+---
+title: "portfolios"
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(dplyr) 
+library(tidyverse)
+library(tictoc)
+library(stringr)
+```
+
+
+# load sample & function
+```{r}
+load(file = "../R_data/sample.Rda")
+```
+
+
+
+# import all cvc deals data
+```{r message=FALSE, warning=FALSE}
+file.list <- list.files(path="../CVC_raw_data", 
+                        pattern='*.csv', full.names = TRUE)
+
+df.list <- lapply(file.list, read_csv2) 
+
+library(plyr)
+cvc_data_raw <- rbind.fill(df.list) %>% dplyr::select(-1,-2, - 8) %>% 
+  dplyr::rename(cvc_fund = 'Acquiror name', target_name = "Target name", target_country = "Target country code")
+
+detach(package:plyr, unload=TRUE)
+
+save(cvc_data_raw, file = "../R_data/cvc_data_raw.Rda")
+
+
+uniquecvcfunds <- cvc_data_raw %>% distinct(cvc_fund)
+```
+
+
+
+# create fyear & separate sic codes into separate columns
+# dplyr::filter deals data for observation period (2008-2016)
+```{r}
+cvc_data <- cvc_data_raw %>% 
+  mutate(fyear = str_sub(`Completed date`, start = -4)) %>% 
+  select(-"Completed date") %>% 
+  select(fyear, everything()) %>%
+  dplyr::filter(fyear >= 2007 & fyear <= 2015) %>% 
+  separate(`Target US SIC code(s)`, c("sic1", "sic2", "sic3", "sic4", "sic5", "sic6", "sic7", "sic8", "sic9", "sic10", "sic11", "sic12", "sic13", "sic14", "sic15", "sic16"), sep = " / ", remove = FALSE, extra = "warn")  %>% 
+  select(- "Target US SIC code(s)")
+
+# convert fyear to numeric
+cvc_data$fyear <- as.numeric(cvc_data$fyear)
+```
+
+
+
+# re-classification of sic codes to 3-digit level
+```{r}
+cvc_data$sic1 <- str_sub(cvc_data$sic1, 1, end = -2)
+cvc_data$sic2 <- str_sub(cvc_data$sic2, 1, end = -2)
+cvc_data$sic3 <- str_sub(cvc_data$sic3, 1, end = -2)
+cvc_data$sic4 <- str_sub(cvc_data$sic4, 1, end = -2)
+cvc_data$sic5 <- str_sub(cvc_data$sic5, 1, end = -2)
+cvc_data$sic6 <- str_sub(cvc_data$sic6, 1, end = -2)
+cvc_data$sic7 <- str_sub(cvc_data$sic7, 1, end = -2)
+cvc_data$sic8 <- str_sub(cvc_data$sic8, 1, end = -2)
+cvc_data$sic9 <- str_sub(cvc_data$sic9, 1, end = -2)
+cvc_data$sic10 <- str_sub(cvc_data$sic10, 1, end = -2)
+cvc_data$sic11 <- str_sub(cvc_data$sic11, 1, end = -2)
+cvc_data$sic12 <- str_sub(cvc_data$sic12, 1, end = -2)
+cvc_data$sic13 <- str_sub(cvc_data$sic13, 1, end = -2)
+cvc_data$sic14 <- str_sub(cvc_data$sic14, 1, end = -2)
+cvc_data$sic15 <- str_sub(cvc_data$sic15, 1, end = -2)
+cvc_data$sic16 <- str_sub(cvc_data$sic16, 1, end = -2)
+```
+
+
+
+# CREATE PORTFOLIOS
+
+# determine to which portfolio years cvc investment belongs
+# assumption: each target remains in portfolio for 4y on average, if no further round of funding made
+# if further funding, then assumption that target remains in portfolio from first invest. year onwards until nth invest. year +4
+```{r}
+cvc_data$portfolio_year <- NA
+cvc_data <- cvc_data %>% select(fyear, portfolio_year, everything())
+
+deals_number <- dim(cvc_data)[1]
+cvc_data_copy <- cvc_data
+cvc_data <- cvc_data_copy[1,]
+cvc_data[] <-  cvc_data[FALSE, ]
+
+tracker <- 1
+
+# run through each deal
+for (i in 1:deals_number) {
+  
+  cvc_temp <- cvc_data_copy[i, ]
+  cvc_temp$portfolio_year <- cvc_temp$fyear
+  cvc_data[dim(cvc_data)[1]+1,] <- cvc_temp
+  
+  cvc_temp$portfolio_year <- cvc_temp$fyear+1
+  cvc_data[dim(cvc_data)[1]+1,] <- cvc_temp
+  
+  cvc_temp$portfolio_year <- cvc_temp$fyear+2
+  cvc_data[dim(cvc_data)[1]+1,] <- cvc_temp
+  
+  cvc_temp$portfolio_year <- cvc_temp$fyear+3
+  cvc_data[dim(cvc_data)[1]+1,] <- cvc_temp
+}
+
+
+
+# exlucde duplicated rows which were created in case of multiple rounds of investment
+cvc_data <- cvc_data %>% 
+  dplyr::filter(!is.na(cvc_fund)) %>% 
+  group_by_at(vars(cvc_fund, target_name)) %>% 
+  distinct(portfolio_year, .keep_all = TRUE)
+```
+
+
+# exlude portfolio years outside observation period
+# group by portfolios in each year per investor
+```{r}
+portfolios <- cvc_data %>% filter(portfolio_year >= 2007 & portfolio_year <= 2015) %>% group_by_at(vars(portfolio_year, cvc_fund, target_name))
+```
+
+
+
+```{r}
+pct <- function(x) {x/lag(x)}
+```
+
+
+# summary statistics for observation period
+```{r}
+portfolios_copy <- portfolios %>% 
+  ungroup() %>% 
+  group_by_at(vars(cvc_fund, portfolio_year)) %>%
+  mutate(n = row_number(target_name)) 
+
+# portfolio size per investor per year
+p_size <- portfolios_copy %>% 
+  dplyr::summarize(p_size = n())
+
+# mean portfolio size per investor
+avg_p_size <- p_size %>% 
+  summarize(avg = mean(p_size))
+
+# mean portfolio size per year
+avg_p_size2 <- p_size %>% group_by(portfolio_year) %>% 
+  summarize(avg = mean(p_size)) %>%
+  mutate(perc_change = pct((avg))) 
+
+# mean portfolio size for whole sample
+avg_p_size3 <- avg_p_size %>% ungroup() %>% summarize(avg = mean(avg))
+```
+
+
+
+# save outout
+```{r}
+save(portfolios, file = "../R_data/portfolios.Rda")
+```
+

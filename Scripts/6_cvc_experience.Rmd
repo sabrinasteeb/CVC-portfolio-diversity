@@ -1,0 +1,75 @@
+---
+title: "Experience"
+---
+
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+```{r}
+library(lubridate)
+library(tidyverse)
+```
+
+
+```{r}
+load("../R_data/cvc_data_raw.Rda")
+```
+
+
+```{r}
+head(cvc_data_raw)
+```
+
+
+# tidy & transform
+```{r}
+# date as date column
+cvc_data <- cvc_data_raw %>% rename(date = `Completed date`) %>% filter(!is.na(date)) %>% mutate(date= dmy(date)) %>% select(-target_country, - `Target US SIC code(s)`) 
+head(cvc_data)
+```
+
+```{r}
+# mutate new variable with date of oldest investment per investor
+cvc_data <- cvc_data %>% group_by(cvc_fund) %>% mutate(first_invest = min(date))
+
+# mutate new variable with duration in days between today! (first investment?) and each investment --> (This is the weight)
+date_of_today <- today()
+
+head(cvc_data)
+```
+
+
+# compute variable with weighted cvc experience per investor in each year
+```{r}
+# number of investments per date per investor
+investments_perdate <- cvc_data %>% group_by_at(vars(date, cvc_fund)) %>% 
+  tally() %>% rename(investments.perdate = n) %>%
+  mutate(duration = as.numeric(difftime(date_of_today, date) / 365.242), investmentsXduration = investments.perdate*duration) %>% 
+  group_by(cvc_fund) 
+
+investments_perdate <- investments_perdate %>% left_join(cvc_data[,-3], by = c("date", "cvc_fund")) %>% mutate(total_weight = as.numeric(difftime(date_of_today, first_invest)  / 365.242), weighted = investmentsXduration/total_weight)
+```
+
+
+# experience = cumulative count of all weighted investments per year
+```{r}
+cvc_experience <- investments_perdate %>% mutate(fyear = year(date)) %>% select(fyear, cvc_fund, weighted) %>% group_by_at(vars(fyear, cvc_fund)) %>% summarize(sum = sum(weighted)) %>% group_by(cvc_fund) %>% mutate(cvc_experience = cumsum(sum))
+```
+
+
+# tidy
+```{r}
+cvc_experience <- cvc_experience %>%  filter(fyear >= 2010 & fyear <= 2015) %>% select(fyear, cvc_fund, cvc_experience)
+save(cvc_experience, file = "../R_data/cvc_experience.Rda")
+```
+
+
+# check distribution of variable before and after log transformation
+```{r}
+hist(cvc_experience$cvc_experience)
+hist(log(cvc_experience$cvc_experience))
+```

@@ -1,0 +1,71 @@
+---
+title: "geo diversity"
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(dplyr) 
+library(tidyverse)
+library(tictoc)
+library(stringr)
+```
+
+
+# load sample & function
+```{r}
+load(file = "../R_data/portfolios.Rda")
+```
+
+
+
+```{r}
+# filter for observation period
+portfolios_geo <- portfolios %>% select(portfolio_year, cvc_fund, target_name, target_country) %>% 
+  filter(portfolio_year >= 2010) 
+
+# number of ventures in portfolio per year --> CV(t)
+ventures_peryear <- portfolios_geo %>% group_by_at(vars(portfolio_year, cvc_fund)) %>% 
+  tally() %>% 
+  rename(ventures.peryear = n)
+
+# number of ventures in portfolio per year / per country / per investor --> cv(j,t)
+ventures_peryear_percountry <- portfolios_geo %>% group_by_at(vars(portfolio_year, cvc_fund, target_country)) %>% 
+  tally() %>% 
+  rename(ventures.peryear.percountry = n)
+
+# number of distinct countries per year / per investor
+countries_peryear <- ventures_peryear_percountry %>%  select(-ventures.peryear.percountry) %>% group_by_at(vars(portfolio_year, cvc_fund)) %>% 
+  summarize(countries_peryear = n()) 
+```
+
+
+
+```{r}
+# join results
+ventures_peryear_percountry <- ventures_peryear_percountry %>%  left_join(countries_peryear, by = c("portfolio_year", "cvc_fund")) %>% left_join(ventures_peryear, by = c("portfolio_year", "cvc_fund"))
+
+# compute arg1
+ventures_peryear_percountry$arg1 <- ((ventures_peryear_percountry$ventures.peryear.percountry / ventures_peryear_percountry$ventures.peryear)^2)
+
+# compute HHI & geografic diversity as reverse HHI
+geo_diversity <- ventures_peryear_percountry %>% group_by_at(vars(portfolio_year, cvc_fund)) %>% select(portfolio_year, cvc_fund, arg1) %>% summarise(HHI = sum(arg1), geo_diversity = 1/HHI)
+
+# tidy
+geo_diversity <- geo_diversity %>% select(portfolio_year, cvc_fund, geo_diversity) %>% rename(fyear = portfolio_year)
+```
+
+
+# save output
+```{r}
+save(geo_diversity, file = "../R_data/geo_diversity.Rda")
+```

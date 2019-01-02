@@ -1,0 +1,223 @@
+---
+title: "longlist: data enrichtment w/ compustat"
+---
+
+# remove previous data environment
+```{r}
+#rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(tidyverse)
+library(tictoc)
+library(dplyr) 
+```
+
+
+# interface to WRDS database has previously been established 
+# connect to WRDS databse 
+```{r}
+wrds <- dbConnect(Postgres(), 
+                  host='wrds-pgdata.wharton.upenn.edu',
+                  port=9737,
+                  user='sabkatst',
+                  password='S!!140140s',
+                  sslmode='require',
+                  dbname='wrds')
+
+save(wrds, file = "../R_data/wrds.Rda")
+```
+
+
+
+# import CVC funds longlist
+```{r}
+longlist_raw <- as_tibble(read_excel("../Data_tables/CVC_longlist.xlsx")) 
+
+longlist_raw$cvc_fund <- toupper(longlist_raw$cvc_fund)
+```
+
+
+# TIDY DATA TO ARRIVE AT SHORTLIST 
+
+# exclude private companies so that only public companies remain 
+CORRECT ---- exclude companies that did not make a cvc investment in observation period
+# result: shorlist used for sample
+```{r}
+shortlist_raw <- longlist_raw %>% filter(is.na(private) & is.na(no_invest_period) & is.na(no_patent_activity)) %>%
+  select(-private, -no_invest_period, -no_patent_activity, -cvc_fund_2, -cvc_fund_3)
+
+save(shortlist_raw, file = "../R_data/shortlist_raw.Rda")
+```
+
+
+
+# DATA ENRICHMENT W/ COMPUSTAT
+
+# query 'Compustat North America - Fundamentals Annual' for financial and market information on parent companies using gvkey as identifier
+# observation period 2010-2015
+```{r}
+id_shortlist <- shortlist_raw$gvkey
+
+shortlist_US <- shortlist_raw %>% filter(country == "US")
+id_US <- shortlist_US$gvkey
+
+sqlcmd <- paste("SELECT gvkey, conm, datadate, fyear, datafmt, indfmt, fic, curcd, act, lct, sale, sich, xrd
+                  FROM compd.funda
+                  WHERE fyear BETWEEN '2008' 
+                  AND '2015'
+                  AND datafmt = 'STD'
+                  AND gvkey = '", id_US,"'", sep="")
+
+# LIST OF DATAFRAMES
+funda_list_US <- lapply(sqlcmd, function(x) dbGetQuery(wrds, x)) 
+
+# FINAL DATAFRAME
+funda_US <- do.call(rbind, funda_list_US)
+```
+
+
+
+# query 'Compustat Global - Fundamentals Annual' using gvkey as identifier
+# observation period 2010-2015 / include 2008 & 2009 for absorptive capacity measure 
+```{r}
+shortlist_global <- shortlist_raw %>% filter(country != "US")
+id_global <- shortlist_global$gvkey
+
+sqlcmd <- paste("SELECT gvkey, conm, datadate, fyear, datafmt, indfmt, fic, curcd, act, lct, sale, sich, xrd
+                  FROM compgd.g_funda
+                  WHERE fyear BETWEEN '2008' 
+                  AND '2015'
+                  AND gvkey = '", id_global,"'", sep="")
+
+# LIST OF DATAFRAMES
+funda_list_global <- lapply(sqlcmd, function(x) dbGetQuery(wrds, x)) 
+
+# FINAL DATAFRAME
+funda_global <- do.call(rbind, funda_list_global)
+```
+
+
+# join US and global Compustat outputs
+```{r}
+shortlist <- bind_rows(funda_US, funda_global) %>% rename(parent_company = conm, country = fic) %>% arrange(parent_company)
+```
+
+
+
+# ENRICH SHORTLIST WITH SIC INFORMATION
+
+# query 'Segment NAICS North America' for SIC code industry information on parent companies using gvkey as identifier
+```{r}
+id_shortlist <- shortlist$gvkey
+
+sqlcmd <- paste("SELECT gvkey, sics, datadate
+                FROM comp.seg_naics
+                WHERE datadate BETWEEN '2010-01-01' 
+                AND '2015-12-31'
+                AND stype = 'BUSSEG'
+                AND gvkey = '", id_shortlist,"'", sep="")
+
+# LIST OF DATAFRAMES
+seg_list <- lapply(sqlcmd, function(x) dbGetQuery(wrds, x)) 
+
+# FINAL DATAFRAME
+seg_df <- do.call(rbind, seg_list)
+```
+
+
+# disconnect wrds connection
+```{r}
+dbDisconnect(wrds)
+```
+
+
+
+# RESHAPING SIC OUTPUT DATA 
+# re-classification of sic codes to 3-digit level
+```{r}
+seg_df <- seg_df %>% group_by(gvkey, datadate) %>%
+  unique() %>%
+  mutate(fyear = as.numeric(substr(datadate, 1, 4))) %>%
+  mutate(sic = substr(sics, start = 1, stop = 3))
+```
+
+
+# summarize class characteristics for shortlist -> warning: no differentation made between primary and secondary sic codes
+```{r}
+shortlist_sum <- seg_df %>%
+  group_by(sic) %>%
+  summarise(parent_companies = n()) %>%
+  mutate(rank = dense_rank(desc(parent_companies))) %>%
+  arrange(rank) %>%
+  mutate(cum_count = cumsum(parent_companies))
+```
+
+
+# change format of seg_df from long to wide
+```{r}
+# change order of columns
+seg_df <- seg_df[,c(1,3,4,5)]
+# group by gvkey und date
+seg_df_grouped <- seg_df %>%
+  dplyr::group_by(gvkey) %>%
+ plyr::count(c("gvkey", "datadate"))
+# how many SICs do the companies each have?
+qplot(seg_df_grouped$freq, geom="histogram", binwidth=1) 
+```
+
+## check
+```{r}
+# order by n descending
+arrange(seg_df_grouped,desc(freq))
+
+# max number of SICs
+max(seg_df_grouped$freq)
+```
+
+
+# reshape
+```{r}
+library(plyr)
+seg_df <- ddply(seg_df, c("gvkey","datadate"), transform, 
+           sic_number = paste0("sic", seq(length(sic))))
+detach(package:plyr, unload=TRUE)
+```
+
+
+# check -> should be until 16 sics
+```{r}
+distinct(seg_df,sic_number)
+```
+
+
+# reshape
+```{r}
+seg_wide <- seg_df %>% spread(sic_number, sic) 
+```
+
+
+
+# JOIN INFO FROM SIC CODES WITH FUNDAMENTALS TO ARRIVE AT FINAL SHORTLIST
+```{r}
+shortlist <- shortlist %>% left_join(seg_wide, by = c("gvkey", "fyear", "datadate")) %>% unique()
+```
+
+
+# tidy df
+# assumption: if no primary/secondary sic data is available from Segment database, then historical sic from Fundamentals applies (only primary one)
+```{r}
+shortlist$sic1 <- ifelse(is.na(shortlist$sic1), str_sub(shortlist$sich, start = 1, end = 3), shortlist$sic1)
+```
+
+
+# save outout
+```{r}
+save(shortlist, file = "../R_data/shortlist.Rda")
+```

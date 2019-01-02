@@ -1,0 +1,56 @@
+---
+title: "Master Notebook"
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r}
+library(knitr)
+
+ksource <- function(x, ...) {
+  source(purl(x, output = tempfile()), ...)
+}
+
+save(ksource, file = "../R_data/ksource.Rda")
+```
+
+
+```{r}
+ksource("1_compustat.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("2_sample.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("3_portfolios.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("4_diversity.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("5_geo_diversity.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("6_cvc_experience.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("7_ma_jv.Rmd",print.eval = TRUE)
+```
+
+```{r}
+load(file = "../R_data/ksource.Rda")
+ksource("8_final_sample.Rmd",print.eval = TRUE)
+```

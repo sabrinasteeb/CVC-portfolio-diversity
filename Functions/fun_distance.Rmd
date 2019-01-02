@@ -1,0 +1,80 @@
+---
+title: "R Notebook"
+editor_options: 
+  chunk_output_type: console
+---
+
+############# FUNCTIONS ##################
+
+# Calculate Distance between two SIC Vectors
+# Input:    two vectors
+# Output:   single number -> Distance
+
+```{r}
+fun_distance <- function(firm_i,firm_j) {
+  
+  # Firm i ist quasi firma 1
+  # Firm j ist quasi firma 2
+  
+  # Debugging
+  # firm_i <- input_matrix[i,]
+  # firm_j <- input_matrix[j,]
+  
+  firm_i <- unlist(firm_i)
+  firm_j <- unlist(firm_j)
+  
+  firm_i <- firm_i[!is.na(firm_i)]
+  firm_j <- firm_j[!is.na(firm_j)]
+  
+  # Hilfsvariablen
+  combined_sic <- c(firm_i,firm_j)
+  unique_sic <- unique(combined_sic)
+  
+  max_unique_sic_num <- length(unique_sic)
+  sic_num <- c(length(firm_i),
+               length(firm_j))
+  unique_sic_num <- c(length(unique(firm_i)),
+               length(unique(firm_j)))
+  max_sic_num <- max(sic_num)
+  
+  # 2nd Step
+  sic_recalc <- matrix(nrow = 2,ncol = max_unique_sic_num)
+  
+  row.names(sic_recalc) <- c("Firm i","Firm j")
+  
+  # -1 wird als nicht vorhanden code verwendet
+  temp_sic <- matrix(NA,nrow = 2,ncol = max_sic_num)
+  temp_sic[1,1:sic_num[1]] <- firm_i[1:sic_num[1]]
+  temp_sic[2,1:sic_num[2]] <- firm_j[1:sic_num[2]]
+  
+  for (firm in 1:2) {
+    for (i in 1:max_unique_sic_num) {
+      #i <- 1
+      temp_fraq <- sum(temp_sic[firm,] == unique_sic[i],na.rm=T) / sic_num[firm]
+      sic_recalc[firm,i] <- temp_fraq
+    }
+  }
+  
+  # 3rd Step
+  arg_1 <- sic_recalc[1,] %*% sic_recalc[2,]
+  arg_2 <- sic_recalc[1,] %*% sic_recalc[1,]
+  arg_3 <- sic_recalc[2,] %*% sic_recalc[2,]
+  
+  distance <- 1 - (arg_1 / (sqrt(arg_2) * sqrt(arg_3) ))
+  
+  return(distance)
+}
+```
+
+```{r}
+firm_investor <- c(1,2)
+firm_portfolio <- c(2,3)
+
+fun_distance(firm_i = firm_investor,firm_j = firm_portfolio)
+```
+
+
+```{r}
+save(fun_distance,file = "../R_data/fun_distance.Rda")
+```
+

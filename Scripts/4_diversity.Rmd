@@ -1,0 +1,151 @@
+---
+title: "diversity measure"
+editor_options: 
+  chunk_output_type: inline
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(dplyr) 
+library(tidyverse)
+library(tictoc)
+```
+
+# load portfolio data & functions
+```{r}
+load(file = "../R_data/portfolios.Rda")
+load(file = "../R_data/sample.Rda")
+
+load(file = "../R_data/fun_distance.Rda")
+load(file = "../R_data/fun_diversity.Rda")
+```
+
+
+
+```{r}
+fund_names <- unique(portfolios$cvc_fund)
+fund_names <- unique(fund_names)
+
+fund_years <- c(2010:2015)
+
+result_matrix <- as.tibble(matrix(0,nrow = length(fund_names) * 
+                                    length(fund_years),ncol = 5)) 
+
+result_matrix[,1] <- fund_names
+result_matrix[,2] <- fund_years
+
+names(result_matrix) <- c("cvc_fund","fyear","diversity","portfolio_size","distinct_sics")
+
+counter <- 1
+total_counter <- length(fund_names) * length(fund_years) +1
+tic()
+for (fund in fund_names) {
+  for (year in fund_years) {
+    
+    # for debugging (comment out if running loop)
+    #fund <- fund_names[50]
+    #year <- fund_years[4]
+    
+    
+    # First row investor sics aufnehmen
+    temp_parent_matrix <- sample[sample$fyear == year &
+                                sample$cvc_fund == fund, grepl("sic\\d", names(sample))] 
+    
+    
+    temp_portfolio_matrix <- portfolios[portfolios$portfolio_year == year &
+                                portfolios$cvc_fund == fund, grepl("sic\\d", names(portfolios))] 
+
+
+    temp_matrix <- bind_rows(temp_parent_matrix, temp_portfolio_matrix)
+    
+    
+    result_matrix[counter,1] <- fund
+    result_matrix[counter,2] <- year
+    
+    
+    result_matrix[counter,3] <- fun_diversity(temp_matrix)
+
+    
+    # substract fund itself
+    result_matrix[counter,4] <- nrow(temp_matrix)-1
+
+    
+    unique_sics <- unique(as.vector(as.matrix(temp_matrix)))
+    unique_sics <- unique_sics[!is.na(unique_sics)]
+    result_matrix[counter,5] <- length(unique_sics)
+
+    
+    counter <- counter + 1
+    fraq <- round(counter/total_counter,4) * 100
+      print(paste0(fraq,"% (" ,fund," - ",year,")"))
+  }
+}
+toc()
+```
+
+
+# manipulate diversity=0 because of log transformation --> work around: replace 0 with 2nd lowest value of distribution
+```{r}
+result_matrix$diversity <- ifelse(result_matrix$diversity == 0, min(result_matrix$diversity[result_matrix$diversity != min(result_matrix$diversity)]), result_matrix$diversity)
+```
+
+
+# mutate log & squared of diversity result 
+```{r}
+result_matrix <- result_matrix %>% mutate(diversity_ln = log(diversity), diversity_ln_sqrt = diversity_ln^2)
+```
+
+
+```{r}
+save(result_matrix, file = "../R_data/result_matrix.Rda")
+```
+
+
+```{r}
+ggplot(result_matrix, aes(diversity)) +
+  geom_histogram(bins= 100)
+
+ggplot(result_matrix, aes(portfolio_size)) +
+  geom_histogram(binwidth = +1)
+
+ggplot(result_matrix, aes(distinct_sics)) +
+  geom_histogram(binwidth = 1)
+```
+
+
+```{r}
+ggplot(result_matrix, aes(x=diversity, y=distinct_sics)) +
+  geom_point(size=2, shape=23) +
+  geom_smooth(method=lm, se=FALSE)
+
+ggplot(result_matrix, aes(x=diversity, y=distinct_sics, colour = as.factor(fyear))) +
+  geom_point(size=2, shape=23)
+
+ggplot(result_matrix, aes(x=diversity, y=portfolio_size, colour = as.factor(fyear))) +
+  geom_point(size=2, shape=23) +
+  geom_smooth(method=lm, se=FALSE)
+
+ggplot(result_matrix, aes(x=diversity, y=portfolio_size, colour = as.factor(fyear))) +
+  geom_point(size=2, shape=23)
+```
+
+
+```{r}
+pairs(~diversity+portfolio_size+distinct_sics,data=result_matrix, 
+   main="Scatterplot Matrix")
+```
+
+
+
+
+

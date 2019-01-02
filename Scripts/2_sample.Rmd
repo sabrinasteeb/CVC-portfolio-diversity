@@ -1,0 +1,101 @@
+---
+title: "Finalise sample"
+---
+
+# remove previous data environment
+```{r}
+rm(list=ls())
+```
+
+
+# load packages
+```{r}
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(RPostgres)
+library(tidyverse)
+library(tictoc)
+library(zoo)
+library(readxl)
+```
+
+
+```{r}
+load(file = "../R_data/shortlist.Rda")
+CVC_longlist <- as_tibble(read_excel("../Data_tables/CVC_longlist.xlsx"))
+```
+
+
+# join with CVC longlist again to join CVC fund names again & tidy
+```{r}
+CVC_longlist$cvc_fund <- toupper(CVC_longlist$cvc_fund)
+CVC_longlist <- CVC_longlist %>% select(cvc_fund, parent_company)
+shortlist <- shortlist %>% left_join(CVC_longlist,  by = "parent_company") %>% select(fyear, parent_company, cvc_fund, everything(), -datadate, -datafmt)
+```
+
+
+# exclude financial corporate investors identified by Computstat variable indfmt = FS
+```{r}
+#unique FS companies in sample
+fs <- shortlist %>% filter(indfmt == "FS") %>% distinct(parent_company) 
+
+#unique industrial corporate investors identified by Computstat variable indfmt = FS
+indl <- shortlist %>% filter(indfmt == "INDL") %>% distinct(parent_company) 
+
+#exclude & tidy
+shortlist <- shortlist %>% anti_join(fs, by = "parent_company") %>% select(-indfmt) 
+```
+
+
+# compute R&D intensity & absorptive capacity (past 3-year sum of R&D intensity)
+```{r}
+width <- 3
+shortlist <- shortlist %>% mutate(rxd_intensity = xrd/sale, absorptive_capacity = rollapply(rxd_intensity, width, sum, align = "right", partial=T)) %>% select(-starts_with("sic"), everything())
+```
+
+
+# full data coverage of all variables must be given in at least 2 years of observation period, otherwise exclude from sample
+# fyear 2009, 2010 exluded automatically because all absorptive_capacity = 0
+```{r}
+sample <- shortlist %>% group_by(parent_company) %>% filter(sum(!is.na(absorptive_capacity))>=2 & sum(!is.na(!act))>=2 & sum(!is.na(lct))>=2) %>% filter(fyear >= 2010 & fyear <= 2015)
+
+n_distinct(sample$parent_company)
+n_distinct(sample$country)
+```
+
+# convert all currencies to USD (conversion factor based on historical mean change rates)
+```{r}
+currencies <- read_excel(path = "../Data_tables/currency_conversion.xlsx", col_types = c("numeric", "text", "numeric"))
+
+sample <- left_join(sample, currencies, by = c("fyear", "curcd"))
+
+sample$current_assets = sample$act * sample$conversionFactor
+sample$current_liabilies = sample$lct * sample$conversionFactor
+sample$sales = sample$sale * sample$conversionFactor
+sample$rxd = sample$xrd * sample$conversionFactor
+
+# tidy
+sample <- sample %>% select(-act, -lct, -sale, -xrd, -rxd_intensity, -curcd, -conversionFactor) %>% select(-starts_with("sic"), everything())
+```
+
+
+# join with patent & year of incorporation data
+```{r}
+patents <- read.csv2(file = "../Data_tables/patents.csv", stringsAsFactors=F)
+sample <- full_join(sample, patents, by = c("fyear", "parent_company")) %>% select(-starts_with("sic"), everything()) 
+
+# tidy
+sample$sic1 <- ifelse(is.na(sample$sic1), sample$sich_x, sample$sic1)
+sample$cvc_fund <- ifelse(is.na(sample$cvc_fund), sample$cvc_x, sample$cvc_fund)
+sample <- sample %>% select(-sich, -sich_x, -cvc_x) 
+
+# save sample to compute diversity variable
+save(sample, file = "../R_data/sample.Rda")
+```
+
+NEXT
+# 1st: RUN PORTFOLIO SKRIPT
+# 2nd: RUN DIVERSITY SKRIPT
+# 3rd: RUN SKRIPTS TO COMPUTE OTHER VARIABLES
+
